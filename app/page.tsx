@@ -15,6 +15,8 @@ interface Calciatore {
   fascia: number | null;
   acquistato: boolean;
   prezzo_acquisto: number;
+  qt_i: number | null; // Quantità iniziale
+  qt_a: number | null; // Quantità attuale
 }
 
 export default function Home() {
