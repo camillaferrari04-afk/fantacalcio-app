@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useBudget } from '@/context/BudgetContext';
 
 interface Calciatore {
   id: number;
@@ -11,6 +12,9 @@ interface Calciatore {
   fvm: number;
   note: string | null;
   prezzo_consigliato: number | null;
+  fascia: number | null;
+  acquistato: boolean;
+  prezzo_acquisto: number;
 }
 
 export default function Home() {
@@ -20,35 +24,44 @@ export default function Home() {
   const [ruoloFiltro, setRuoloFiltro] = useState('TUTTI');
   const [savingId, setSavingId] = useState<number | null>(null);
 
+  // Stato per il Modal di Acquisto
+  const [modalCalciatore, setModalCalciatore] = useState<Calciatore | null>(null);
+  const [prezzoInput, setPrezzoInput] = useState<string>('');
+
+  const { refreshBudget } = useBudget();
+
   // Carica i calciatori da Supabase
-  useEffect(() => {
-    async function fetchCalciatori() {
-      const { data, error } = await supabase
-        .from('calciatori')
-        .select('*')
-        .order('fvm', { ascending: false }); // Ordina per FVM decrescente
+  const fetchCalciatori = async () => {
+    const { data, error } = await supabase
+      .from('calciatori')
+      .select('*')
+      .order('qt_i', { ascending: false });
 
-      if (error) {
-        console.error('Errore durante il caricamento:', error.message);
-      } else {
-        setCalciatori(data || []);
-      }
-      setLoading(false);
+    if (error) {
+      console.error('Errore durante il caricamento:', error.message);
+    } else {
+      setCalciatori(data || []);
     }
+    setLoading(false);
+  };
 
+  useEffect(() => {
     fetchCalciatori();
   }, []);
 
-  // Aggiorna nota o prezzo consigliato su Supabase
-  const handleUpdate = async (id: number, field: 'note' | 'prezzo_consigliato', value: string | number) => {
+  // Aggiorna un singolo campo (Note, Prezzo Consigliato, Fascia)
+  const handleUpdate = async (
+    id: number,
+    field: 'note' | 'prezzo_consigliato' | 'fascia',
+    value: string | number | null
+  ) => {
     setSavingId(id);
 
-    // Aggiornamento locale immediato per reattività UI
+    // Aggiornamento locale immediato
     setCalciatori((prev) =>
       prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
     );
 
-    // Aggiornamento su Supabase
     const { error } = await supabase
       .from('calciatori')
       .update({ [field]: value })
@@ -56,13 +69,70 @@ export default function Home() {
 
     if (error) {
       console.error(`Errore durante l'aggiornamento di ${field}:`, error.message);
-      alert("Errore nel salvataggio! Verifica le politiche (RLS) della tabella su Supabase.");
+      alert('Errore nel salvataggio! Riprova.');
+      fetchCalciatori(); // Ripristina dati da DB
     }
 
     setSavingId(null);
   };
 
-  // Badge colore per ruolo
+  // Apre il modal per acquistare
+  const handleOpenCompraModal = (c: Calciatore) => {
+    setModalCalciatore(c);
+    setPrezzoInput(c.prezzo_consigliato ? String(c.prezzo_consigliato) : '1');
+  };
+
+  // Salva l'acquisto su Supabase
+  const handleConfermaAcquisto = async () => {
+    if (!modalCalciatore) return;
+
+    const prezzo = Number(prezzoInput) || 1;
+
+    // Update locale
+    setCalciatori((prev) =>
+      prev.map((item) =>
+        item.id === modalCalciatore.id
+          ? { ...item, acquistato: true, prezzo_acquisto: prezzo }
+          : item
+      )
+    );
+
+    const { error } = await supabase
+      .from('calciatori')
+      .update({ acquistato: true, prezzo_acquisto: prezzo })
+      .eq('id', modalCalciatore.id);
+
+    if (error) {
+      alert('Errore durante il salvataggio dell\'acquisto');
+      fetchCalciatori();
+    } else {
+      await refreshBudget(); // Aggiorna il saldo in alto
+    }
+
+    setModalCalciatore(null);
+  };
+
+  // Annulla l'acquisto di un giocatore
+  const handleAnnullaAcquisto = async (id: number) => {
+    setCalciatori((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, acquistato: false, prezzo_acquisto: 0 } : item
+      )
+    );
+
+    const { error } = await supabase
+      .from('calciatori')
+      .update({ acquistato: false, prezzo_acquisto: 0 })
+      .eq('id', id);
+
+    if (!error) {
+      await refreshBudget();
+    } else {
+      fetchCalciatori();
+    }
+  };
+
+  // Colore del badge ruolo
   const getRuoloBadge = (ruolo: string) => {
     switch (ruolo?.toUpperCase()) {
       case 'P':
@@ -74,40 +144,33 @@ export default function Home() {
       case 'A':
         return 'bg-rose-100 text-rose-800 border-rose-300';
       default:
-        return 'bg-gray-100 text-gray-800 border-gray-300';
+        return 'bg-slate-100 text-slate-800 border-slate-300';
     }
   };
 
-  // Filtraggio dinamico dei calciatori
+  // Filtro calciatori
   const calciatoriFiltrati = calciatori.filter((c) => {
-    const matchNome = c.nome.toLowerCase().includes(search.toLowerCase()) || 
-                      c.squadra.toLowerCase().includes(search.toLowerCase());
+    const matchNome =
+      c.nome.toLowerCase().includes(search.toLowerCase()) ||
+      c.squadra.toLowerCase().includes(search.toLowerCase());
     const matchRuolo = ruoloFiltro === 'TUTTI' || c.r?.toUpperCase() === ruoloFiltro;
     return matchNome && matchRuolo;
   });
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center min-h-screen bg-slate-50">
-        <p className="text-lg font-medium text-slate-600 animate-pulse">Caricamento taccuino fantacalcio...</p>
+      <div className="flex justify-center items-center py-20">
+        <p className="text-lg font-medium text-slate-500 animate-pulse">
+          Caricamento taccuino...
+        </p>
       </div>
     );
   }
 
   return (
-    <main className="max-w-5xl mx-auto p-4 sm:p-6 min-h-screen bg-slate-50">
-      {/* Header e Titolo */}
-      <header className="mb-6">
-        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-          Taccuino Asta Fantacalcio
-        </h1>
-        <p className="text-sm text-slate-500 mt-1">
-          {calciatoriFiltrati.length} calciatori trovati
-        </p>
-      </header>
-
+    <div className="space-y-4">
       {/* Barra di ricerca e filtri */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
+      <div className="flex flex-col sm:flex-row gap-3">
         <input
           type="text"
           placeholder="Cerca calciatore o squadra..."
@@ -116,12 +179,12 @@ export default function Home() {
           className="flex-1 p-3 border border-slate-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-slate-900"
         />
 
-        <div className="flex gap-1.5 bg-slate-200 p-1 rounded-xl">
+        <div className="flex gap-1 bg-slate-200 p-1 rounded-xl justify-between sm:justify-start">
           {['TUTTI', 'P', 'D', 'C', 'A'].map((r) => (
             <button
               key={r}
               onClick={() => setRuoloFiltro(r)}
-              className={`px-4 py-2 font-bold text-sm rounded-lg transition-colors ${
+              className={`px-3 py-1.5 font-bold text-sm rounded-lg transition-colors ${
                 ruoloFiltro === r
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
@@ -133,14 +196,18 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Griglia Calciatori */}
-      <div className="grid gap-4">
+      {/* Lista Calciatori */}
+      <div className="grid gap-3">
         {calciatoriFiltrati.map((c) => (
           <div
             key={c.id}
-            className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md transition-shadow flex flex-col md:flex-row md:items-center justify-between gap-4"
+            className={`p-4 bg-white border rounded-xl shadow-sm transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+              c.acquistato
+                ? 'border-emerald-400 bg-emerald-50/30'
+                : 'border-slate-200 hover:shadow-md'
+            }`}
           >
-            {/* Info Calciatore */}
+            {/* Info principali */}
             <div className="flex items-center gap-3">
               <span
                 className={`w-9 h-9 flex items-center justify-center font-bold text-sm rounded-full border ${getRuoloBadge(
@@ -156,54 +223,135 @@ export default function Home() {
                     {c.squadra}
                   </span>
                 </div>
-                <span className="text-xs text-slate-400 font-medium">FVM: {c.fvm ?? '-'}</span>
+                <div className="flex gap-3 text-xs text-slate-400 font-medium mt-0.5">
+                  <div className="flex flex-col gap-0.5 mt-1">
+                  <span className="text-xs text-slate-400 font-medium">Q.iniziale: {c.qt_i ?? '-'}</span>
+                  <span className="text-xs text-slate-400 font-medium">Q.attuale: {c.qt_a ?? '-'}</span>
+                  <span className="text-xs text-slate-400 font-medium">FVM: {c.fvm ?? '-'}</span>
+                </div>
+                </div>
               </div>
             </div>
 
-            {/* Input Modificabili (Prezzo e Note) */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 border-t md:border-t-0 pt-3 md:pt-0">
-              {/* Input Prezzo Consigliato */}
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-slate-500 font-semibold whitespace-nowrap">Max (cr):</label>
+            {/* Controlli e Azioni */}
+            <div className="flex flex-wrap items-center gap-3 border-t md:border-t-0 pt-3 md:pt-0 justify-between md:justify-end">
+              {/* Selettore Fascia */}
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-semibold text-slate-400 mr-1">Fascia:</span>
+                {[1, 2, 3, 4, 5].map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => handleUpdate(c.id, 'fascia', c.fascia === f ? null : f)}
+                    className={`w-7 h-7 text-xs font-bold rounded-lg border transition-all ${
+                      c.fascia === f
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    F{f}
+                  </button>
+                ))}
+              </div>
+
+              {/* Max consigliato */}
+              <div className="flex items-center gap-1.5">
+                <label className="text-xs text-slate-400 font-semibold">Max:</label>
                 <input
                   type="number"
                   defaultValue={c.prezzo_consigliato ?? ''}
                   onBlur={(e) => {
-                    const val = e.target.value === '' ? 0 : Number(e.target.value);
-                    if (val !== c.prezzo_consigliato) handleUpdate(c.id, 'prezzo_consigliato', val);
+                    const val = e.target.value === '' ? null : Number(e.target.value);
+                    if (val !== c.prezzo_consigliato)
+                      handleUpdate(c.id, 'prezzo_consigliato', val);
                   }}
-                  className="w-20 p-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-slate-50 font-bold text-emerald-600 text-right"
+                  className="w-16 p-1.5 text-xs font-bold border border-slate-300 rounded-lg text-right bg-slate-50 text-emerald-600"
                   placeholder="0"
                 />
               </div>
 
-              {/* Input Note */}
-              <div className="flex items-center gap-2 flex-1">
-                <input
-                  type="text"
-                  defaultValue={c.note ?? ''}
-                  onBlur={(e) => {
-                    if (e.target.value !== (c.note ?? '')) handleUpdate(c.id, 'note', e.target.value);
-                  }}
-                  className="w-full sm:w-64 p-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-slate-50 text-slate-700"
-                  placeholder="Aggiungi una nota..."
-                />
-              </div>
+              {/* Note */}
+              <input
+                type="text"
+                defaultValue={c.note ?? ''}
+                onBlur={(e) => {
+                  if (e.target.value !== (c.note ?? '')) handleUpdate(c.id, 'note', e.target.value);
+                }}
+                className="w-full sm:w-40 p-1.5 text-xs border border-slate-300 rounded-lg bg-slate-50 text-slate-700"
+                placeholder="Note..."
+              />
 
-              {/* Indicatore di salvataggio */}
+              {/* Bottone Compra / Acquistato */}
+              {c.acquistato ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-lg border border-emerald-300">
+                    Preso a {c.prezzo_acquisto} cr
+                  </span>
+                  <button
+                    onClick={() => handleAnnullaAcquisto(c.id)}
+                    className="text-xs text-rose-500 hover:underline font-semibold"
+                  >
+                    Annulla
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleOpenCompraModal(c)}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm transition-colors"
+                >
+                  + Compra
+                </button>
+              )}
+
               {savingId === c.id && (
-                <span className="text-xs text-indigo-500 animate-pulse font-medium">Salvataggio...</span>
+                <span className="text-[10px] text-indigo-500 animate-pulse">Saving...</span>
               )}
             </div>
           </div>
         ))}
-
-        {calciatoriFiltrati.length === 0 && (
-          <div className="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300">
-            <p className="text-slate-500 font-medium">Nessun calciatore trovato con questi criteri.</p>
-          </div>
-        )}
       </div>
-    </main>
+
+      {/* POPUP / MODAL ACQUISTO */}
+      {modalCalciatore && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100">
+            <h3 className="text-xl font-black text-slate-900 mb-1">
+              Conferma Acquisto
+            </h3>
+            <p className="text-sm text-slate-500 mb-4">
+              A quanti crediti hai acquistato <span className="font-bold text-slate-800">{modalCalciatore.nome}</span>?
+            </p>
+
+            <div className="mb-6">
+              <label className="block text-xs font-bold text-slate-400 mb-1 uppercase">
+                Prezzo Pagato (Crediti)
+              </label>
+              <input
+                type="number"
+                value={prezzoInput}
+                onChange={(e) => setPrezzoInput(e.target.value)}
+                autoFocus
+                className="w-full text-2xl font-black p-3 border-2 border-indigo-500 rounded-xl text-indigo-600 focus:outline-none bg-indigo-50/30"
+                placeholder="Es. 25"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setModalCalciatore(null)}
+                className="flex-1 py-2.5 font-bold text-sm bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl transition-colors"
+              >
+                Annulla
+              </button>
+              <button
+                onClick={handleConfermaAcquisto}
+                className="flex-1 py-2.5 font-bold text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-md transition-colors"
+              >
+                Conferma
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
