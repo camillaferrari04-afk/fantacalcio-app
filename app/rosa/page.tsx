@@ -36,7 +36,6 @@ export default function PaginaRosa() {
     fetchRosa();
   }, []);
 
-  // Annulla acquisto (rimuove il calciatore dalla rosa)
   const handleRimuovi = async (id: number) => {
     setAcquistati((prev) => prev.filter((item) => item.id !== id));
 
@@ -52,13 +51,11 @@ export default function PaginaRosa() {
     }
   };
 
-  // Suddivisione per ruolo
   const portieri = acquistati.filter((c) => c.r?.toUpperCase() === 'P');
   const difensori = acquistati.filter((c) => c.r?.toUpperCase() === 'D');
   const centrocampisti = acquistati.filter((c) => c.r?.toUpperCase() === 'C');
   const attaccanti = acquistati.filter((c) => c.r?.toUpperCase() === 'A');
 
-  // Calcolo spesa per reparto
   const spesaP = portieri.reduce((acc, curr) => acc + (curr.prezzo_acquisto || 0), 0);
   const spesaD = difensori.reduce((acc, curr) => acc + (curr.prezzo_acquisto || 0), 0);
   const spesaC = centrocampisti.reduce((acc, curr) => acc + (curr.prezzo_acquisto || 0), 0);
@@ -84,7 +81,6 @@ export default function PaginaRosa() {
 
   return (
     <div className="space-y-6">
-      {/* Scheda Riepilogo Totale */}
       <div className="bg-slate-900 text-white p-5 rounded-2xl shadow-xl flex flex-wrap justify-between items-center gap-4">
         <div>
           <h2 className="text-xl font-black tracking-tight text-indigo-400">
@@ -113,11 +109,9 @@ export default function PaginaRosa() {
           </p>
         </div>
       ) : (
-        /* Disposizione della Rosa a righe centrate tipo formazione */
         <div className="space-y-6 bg-slate-100 p-4 sm:p-6 rounded-3xl border border-slate-200">
           {reparti.map((rep) => (
             <div key={rep.titolo} className="space-y-3">
-              {/* Header Reparto */}
               <div className="flex justify-between items-center px-2">
                 <div className="flex items-center gap-2">
                   <span className={`w-3 h-3 rounded-full ${rep.badgeColor}`} />
@@ -130,7 +124,6 @@ export default function PaginaRosa() {
                 </span>
               </div>
 
-              {/* Righe Centrate Giocatori */}
               {rep.lista.length > 0 ? (
                 <div className="flex flex-wrap justify-center gap-2.5 sm:gap-3">
                   {rep.lista.map((c) => (
