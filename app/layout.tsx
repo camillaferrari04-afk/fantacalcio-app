@@ -70,6 +70,16 @@ function HeaderAndNav({ children }: { children: React.ReactNode }) {
           <span className="text-xl">⚽</span>
           <span>La Mia Rosa</span>
         </Link>
+
+        <Link
+          href="/note"
+          className={`flex flex-col items-center gap-1 text-xs font-bold transition-colors ${
+            pathname === '/note' ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <span className="text-xl">📝</span>
+          <span>Note</span>
+        </Link>
       </nav>
     </div>
   );
